@@ -17,8 +17,19 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedSong = null;
     let videoPath = null;
     
+    // Check if auto-start is enabled
+    const autoStart = document.body.getAttribute('data-auto-start') === 'true';
+    
     // Load trending songs
     fetchTrendingSongs();
+    
+    // Auto-start process if enabled
+    if (autoStart) {
+        statusMessage.textContent = 'Auto-starting the process...';
+        setTimeout(() => {
+            generateQuote();
+        }, 2000);
+    }
     
     // Event listeners
     if (generateQuoteBtn) {
@@ -130,6 +141,22 @@ document.addEventListener('DOMContentLoaded', function() {
                             
                             setTimeout(() => {
                                 progressFill.style.width = '0%';
+                                
+                                // Auto-start video creation if trending songs are loaded
+                                if (document.body.getAttribute('data-auto-start') === 'true' && window.trendingSongs && window.trendingSongs.length > 0) {
+                                    // Auto-select the first song
+                                    if (musicSelector.options.length > 1) {
+                                        musicSelector.selectedIndex = 1; // Select first real song, not the placeholder
+                                        const songId = musicSelector.value;
+                                        selectedSong = window.trendingSongs.find(song => song.url === songId);
+                                        songDetails.textContent = `Selected: ${selectedSong.title} by ${selectedSong.artist}`;
+                                        
+                                        // Create the video automatically
+                                        setTimeout(() => {
+                                            createVideo();
+                                        }, 1000);
+                                    }
+                                }
                             }, 1000);
                         }, 500);
                     }, 3000); // Second line appears after 3 seconds
@@ -175,6 +202,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 setTimeout(() => {
                     progressFill.style.width = '0%';
+                    
+                    // Auto-upload if auto-start is enabled
+                    if (document.body.getAttribute('data-auto-start') === 'true') {
+                        setTimeout(() => {
+                            uploadToYoutube();
+                        }, 1000);
+                    }
                 }, 1000);
             })
             .catch(error => {

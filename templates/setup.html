@@ -1,0 +1,113 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup API Keys</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .setup-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .setup-form {
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .instructions {
+            background-color: #e8f4f8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <h1>API Keys Setup</h1>
+        
+        <div class="instructions">
+            <h2>Instructions</h2>
+            <h3>Gemini API Key</h3>
+            <ol>
+                <li>Go to <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></li>
+                <li>Create an API key or use an existing one</li>
+                <li>Copy the API key and paste it below</li>
+            </ol>
+            
+            <h3>YouTube API Access</h3>
+            <ol>
+                <li>Go to <a href="https://console.developers.google.com/" target="_blank">Google Cloud Console</a></li>
+                <li>Create a new project or select an existing one</li>
+                <li>Enable the YouTube Data API v3</li>
+                <li>Create OAuth credentials (Web application type)</li>
+                <li>Add this URL as an authorized redirect URI: <code>{{ url_for('oauth2callback', _external=True) }}</code></li>
+                <li>Copy the Client ID, Client Secret, and Project ID to the form below</li>
+            </ol>
+        </div>
+        
+        <form class="setup-form" action="{{ url_for('save_keys') }}" method="POST">
+            <div class="status {% if gemini_api_key %}success{% else %}error{% endif %}">
+                Gemini API Key: {% if gemini_api_key %}Configured{% else %}Not configured{% endif %}
+            </div>
+            
+            <div class="status {% if client_secret_exists %}success{% else %}error{% endif %}">
+                YouTube API: {% if client_secret_exists %}Configured{% else %}Not configured{% endif %}
+            </div>
+            
+            <div class="form-group">
+                <label for="gemini_api_key">Gemini API Key:</label>
+                <input type="text" id="gemini_api_key" name="gemini_api_key" value="{{ gemini_api_key or '' }}" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="client_id">Google OAuth Client ID:</label>
+                <input type="text" id="client_id" name="client_id" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="client_secret">Google OAuth Client Secret:</label>
+                <input type="text" id="client_secret" name="client_secret" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="project_id">Google Cloud Project ID:</label>
+                <input type="text" id="project_id" name="project_id" required>
+            </div>
+            
+            <button type="submit" class="btn">Save Keys</button>
+        </form>
+    </div>
+</body>
+</html>
