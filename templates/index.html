@@ -1,0 +1,64 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programming Quote Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Programming Quote Video Generator</h1>
+        
+        {% if not authenticated %}
+        <div class="auth-container">
+            <p>Please log in to use this application:</p>
+            <div class="auth-box">
+                <script 
+                    authed="location.reload()" 
+                    src="https://auth.util.repl.co/script.js">
+                </script>
+            </div>
+        </div>
+        {% else %}
+        <div class="user-info">
+            <p>Welcome, {{ user_name }}!</p>
+        </div>
+        
+        <div class="controls">
+            <button id="generateQuoteBtn" class="btn">Generate New Quote</button>
+            <button id="createVideoBtn" class="btn" disabled>Create Video</button>
+            <button id="uploadYoutubeBtn" class="btn" disabled>Upload to YouTube</button>
+        </div>
+        
+        <div class="preview-container">
+            <div id="quoteCanvas" class="quote-canvas">
+                <div class="quote-line-1" id="quoteLine1"></div>
+                <div class="quote-line-2" id="quoteLine2"></div>
+                <div class="quote-author" id="quoteAuthor"></div>
+            </div>
+        </div>
+        
+        <div class="music-selection">
+            <h3>Select Background Music</h3>
+            <select id="musicSelector" disabled>
+                <option value="">Loading songs...</option>
+            </select>
+            <div id="songDetails"></div>
+        </div>
+        
+        <div class="status-container">
+            <div id="statusMessage"></div>
+            <div id="progressBar" class="progress-bar">
+                <div id="progressFill" class="progress-fill"></div>
+            </div>
+        </div>
+        
+        <a href="/youtube/auth" id="youtubeAuthBtn" class="btn youtube-btn">Authenticate with YouTube</a>
+        {% endif %}
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
