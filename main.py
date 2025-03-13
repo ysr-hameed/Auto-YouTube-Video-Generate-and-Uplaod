@@ -122,7 +122,7 @@ def generate_quote():
         genai.configure(api_key=gemini_api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        prompt = "Generate a powerful and inspiring programming quote that is deep and meaningful. Return exactly two sentences, with each sentence on a new line. First line should be the quote, second line should be the author."
+        prompt = "Generate a unique, powerful and inspiring programming quote that is deep and meaningful. Each quote should be completely different from any previous quotes. Return exactly two sentences, with each sentence on a new line. First line should be the quote, second line should be the author."
         
         response = model.generate_content(prompt)
         quote_text = response.text.strip().split('\n')
@@ -202,13 +202,21 @@ def create_video():
         timestamp = int(time.time())
         video_path = f'uploads/quote_video_{timestamp}.mp4'
         
+        # Split the quote into lines if needed for better display
+        quote_lines = [quote]
+        if len(quote) > 50:  # Split long quotes
+            words = quote.split()
+            mid = len(words) // 2
+            quote_lines = [' '.join(words[:mid]), ' '.join(words[mid:])]
+        
         # Create a video with text using ffmpeg
         text_cmd = [
             'ffmpeg', '-y',
             '-f', 'lavfi', 
-            '-i', f'color=c=black:s=720x1280:d=15', 
-            '-vf', f"drawtext=text='{quote}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf," +
-                  f"drawtext=text='- {author}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h-text_h)/2+200:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            '-i', f'color=c=#121212:s=720x1280:d=15', 
+            '-vf', f"drawtext=text='{quote_lines[0]}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h/2)-100:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:box=1:boxcolor=black@0.5:line_spacing=10," +
+                  (f"drawtext=text='{quote_lines[1]}':fontcolor=#FFDD00:fontsize=40:x=(w-text_w)/2:y=(h/2):fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:box=1:boxcolor=black@0.5:line_spacing=10," if len(quote_lines) > 1 else "") +
+                  f"drawtext=text='- {author}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h/2)+150:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             '-c:v', 'libx264', 
             '-t', '15',
             '-pix_fmt', 'yuv420p',

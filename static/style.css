@@ -89,27 +89,30 @@ h1 {
 .quote-canvas {
     width: 405px; /* 9:16 ratio for 720px height */
     height: 720px;
-    background-color: #2c3e50;
+    background-color: #121212;
     border-radius: 10px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    padding: 30px;
+    padding: 20px;
     color: white;
     position: relative;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+    font-family: 'Poppins', Arial, sans-serif;
 }
 
 .quote-line-1, .quote-line-2 {
-    font-size: 32px;
+    font-size: 28px;
     line-height: 1.4;
     text-align: center;
-    margin-bottom: 20px;
+    margin-bottom: 15px;
     font-weight: bold;
     opacity: 0;
     transition: opacity 1s, transform 1s;
+    width: 100%;
+    padding: 0 10px;
 }
 
 .quote-line-1.visible, .quote-line-2.visible {
@@ -119,10 +122,12 @@ h1 {
 
 .quote-line-1 {
     transform: translateY(-20px);
+    color: #ffffff;
 }
 
 .quote-line-2 {
     transform: translateY(20px);
+    color: #FFDD00;
 }
 
 .quote-author {

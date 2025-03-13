@@ -170,13 +170,19 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function createVideo() {
-        if (!currentQuote || !musicSelector.value) {
-            statusMessage.textContent = 'Please generate a quote and select background music first';
+        if (!currentQuote) {
+            statusMessage.textContent = 'Please generate a quote first';
             return;
         }
         
-        statusMessage.textContent = 'Creating video with YouTube audio...';
+        statusMessage.textContent = 'Creating video with trending audio...';
         progressFill.style.width = '50%';
+        
+        // Use first available song or proceed without music if none is available
+        let audioUrl = '';
+        if (window.trendingSongs && window.trendingSongs.length > 0) {
+            audioUrl = window.trendingSongs[0].url;
+        }
         
         fetch('/create_video', {
             method: 'POST',
@@ -186,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({
                 quote: currentQuote,
                 author: currentAuthor,
-                audio_url: musicSelector.value
+                audio_url: audioUrl
             })
         })
             .then(response => response.json())

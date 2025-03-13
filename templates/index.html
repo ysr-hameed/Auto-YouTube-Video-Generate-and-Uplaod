@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Programming Quote Generator</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body data-auto-start="{{ auto_start|default(false)|lower }}">
@@ -40,8 +41,8 @@
             </div>
         </div>
         
-        <div class="music-selection">
-            <h3>Select Background Music</h3>
+        <div class="music-selection" style="display: none;">
+            <h3>Background Music (Auto-Selected)</h3>
             <select id="musicSelector" disabled>
                 <option value="">Loading songs...</option>
             </select>
