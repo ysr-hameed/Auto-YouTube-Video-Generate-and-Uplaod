@@ -1,5 +1,4 @@
-
-import os
+None os
 import json
 import time
 import random
@@ -14,15 +13,10 @@ import subprocess
 import threading
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # Replace with a secure secret key
+app.secret_key = 'your_secret_key'  # Replace with a secure secret key'httpsaSyAjYzAiMu15hHve6g7qjTQA7IX9R60abW8 Configure Gemini APIvariableaSyAjYzAiMu15hHve6g7qjTQA7IX9R60abW8MINI_API_KEY = "AIzaSyAjYzAiMu15hHve6g7qjTQA7IX9R60abW8iable"
 
-# Configure Gemini API
-GEMINI_API_KEY = None  # Will be set via environment variable
-
-# YouTube API scopes
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
-
-# Create templates directory if it doesn't exist
+# YouTube API scoenvironment=viaent://www.googleapis.com/auth/youtub'templates'
+# Create templates dir'templates't doesn't exist
 os.makedirs('templates', exist_ok=True)
 os.makedirs('static', exist_ok=True)
 os.makedirs('uploads', exist_ok=True)
