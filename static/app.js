@@ -148,7 +148,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        statusMessage.textContent = 'Creating video...';
+        statusMessage.textContent = 'Creating video with YouTube audio...';
         progressFill.style.width = '50%';
         
         fetch('/create_video', {

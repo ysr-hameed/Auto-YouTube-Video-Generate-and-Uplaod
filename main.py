@@ -73,35 +73,168 @@ def generate_quote():
 
 @app.route('/get_trending_audio')
 def get_trending_audio():
-    # For demo purposes, we'll use a list of popular songs
-    # In a real app, you would integrate with a music API
-    songs = [
-        {"title": "Trending Song 1", "artist": "Artist 1", "url": "https://example.com/song1.mp3"},
-        {"title": "Trending Song 2", "artist": "Artist 2", "url": "https://example.com/song2.mp3"},
-        {"title": "Trending Song 3", "artist": "Artist 3", "url": "https://example.com/song3.mp3"}
-    ]
-    
-    return jsonify({"songs": songs})
+    try:
+        from pytube import YouTube
+        import os
+        
+        # YouTube trending music URL (this gets trending music videos)
+        trending_url = "https://www.youtube.com/feed/trending?bp=4gINGgt5dG1hX2NoYXJ0cw%3D%3D"
+        
+        # For demo/testing purposes, we'll use some popular music video URLs
+        # In a real app, you would scrape the trending page properly
+        popular_videos = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",  # A popular music video
+            "https://www.youtube.com/watch?v=JGwWNGJdvx8",  # Another popular music video
+            "https://www.youtube.com/watch?v=kJQP7kiw5Fk"   # Another popular music video
+        ]
+        
+        songs = []
+        
+        for video_url in popular_videos[:3]:  # Limit to 3 videos
+            try:
+                # Get video info
+                yt = YouTube(video_url)
+                
+                # Download audio only
+                audio_path = os.path.join('uploads', f"{yt.title.replace(' ', '_')}.mp3")
+                
+                if not os.path.exists(audio_path):
+                    audio = yt.streams.filter(only_audio=True).first()
+                    audio.download(output_path='uploads', filename=os.path.basename(audio_path))
+                
+                songs.append({
+                    "title": yt.title,
+                    "artist": yt.author,
+                    "url": audio_path,
+                    "thumbnail": yt.thumbnail_url
+                })
+            except Exception as e:
+                print(f"Error processing video {video_url}: {str(e)}")
+        
+        return jsonify({"songs": songs})
+    except Exception as e:
+        return jsonify({"error": str(e), "songs": [
+            {"title": "Fallback Song 1", "artist": "Artist 1", "url": "https://example.com/song1.mp3"},
+            {"title": "Fallback Song 2", "artist": "Artist 2", "url": "https://example.com/song2.mp3"}
+        ]})
 
 @app.route('/create_video', methods=['POST'])
 def create_video():
-    data = request.json
-    quote = data.get('quote', '')
-    author = data.get('author', '')
-    
-    # Here we would use ffmpeg to create a video
-    # For demonstration, we'll just create a placeholder
-    video_path = 'uploads/quote_video.mp4'
-    
-    # In a real implementation, you would:
-    # 1. Create an HTML canvas with the quote
-    # 2. Capture it as an image
-    # 3. Use ffmpeg to create a video with the image and audio
-    
-    cmd = f"echo 'Video would be created with quote: {quote} by {author}' > {video_path}"
-    subprocess.run(cmd, shell=True)
-    
-    return jsonify({"video_path": video_path})
+    try:
+        data = request.json
+        quote = data.get('quote', '')
+        author = data.get('author', '')
+        audio_url = data.get('audio_url', '')
+        
+        if not os.path.exists('uploads'):
+            os.makedirs('uploads')
+            
+        # Create a temporary HTML file with the quote for screenshot
+        html_path = 'uploads/quote_template.html'
+        with open(html_path, 'w') as f:
+            f.write(f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {{
+                        margin: 0;
+                        padding: 0;
+                        background-color: #1a1a1a;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        width: 100vw;
+                        overflow: hidden;
+                    }}
+                    .quote-canvas {{
+                        width: 720px;
+                        height: 1280px; /* 9:16 aspect ratio */
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: center;
+                        align-items: center;
+                        background: linear-gradient(135deg, #1a1a1a 0%, #303030 100%);
+                        color: white;
+                        text-align: center;
+                        padding: 40px;
+                        box-sizing: border-box;
+                        position: relative;
+                    }}
+                    .quote-line-1, .quote-line-2 {{
+                        font-size: 42px;
+                        font-weight: bold;
+                        margin-bottom: 20px;
+                        max-width: 80%;
+                    }}
+                    .quote-author {{
+                        font-size: 28px;
+                        font-style: italic;
+                        margin-top: 30px;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="quote-canvas">
+                    <div class="quote-line-1">{quote.split('. ')[0]}.</div>
+                    <div class="quote-line-2">{''.join(quote.split('. ')[1:]) if len(quote.split('. ')) > 1 else ''}</div>
+                    <div class="quote-author">- {author}</div>
+                </div>
+            </body>
+            </html>
+            """)
+        
+        # Generate a unique filename
+        timestamp = int(time.time())
+        image_path = f'uploads/quote_image_{timestamp}.png'
+        video_path = f'uploads/quote_video_{timestamp}.mp4'
+        
+        # Use a headless browser or screenshot tool to capture the HTML
+        # For simplicity, we'll use a placeholder image or you can install and use tools like wkhtmltoimage
+        # This is a simplified approach - in production you'd use a proper HTML to image tool
+        
+        # Create a blank image with text using ffmpeg
+        text_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'lavfi', 
+            '-i', f'color=c=black:s=720x1280:d=15', 
+            '-vf', f"drawtext=text='{quote}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h-text_h)/2:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf," +
+                  f"drawtext=text='- {author}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h-text_h)/2+200:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            '-c:v', 'libx264', 
+            '-t', '15',
+            '-pix_fmt', 'yuv420p',
+            image_path.replace('.png', '_temp.mp4')
+        ]
+        
+        subprocess.run(text_cmd)
+        
+        # Now add the audio
+        if os.path.exists(audio_url) and audio_url.startswith('uploads/'):
+            audio_cmd = [
+                'ffmpeg', '-y',
+                '-i', image_path.replace('.png', '_temp.mp4'),
+                '-i', audio_url,
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-shortest',
+                video_path
+            ]
+            
+            subprocess.run(audio_cmd)
+        else:
+            # If no audio, just rename the temp video
+            os.rename(image_path.replace('.png', '_temp.mp4'), video_path)
+        
+        # Clean up temp files
+        if os.path.exists(image_path.replace('.png', '_temp.mp4')):
+            os.remove(image_path.replace('.png', '_temp.mp4'))
+        
+        return jsonify({"video_path": video_path})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/youtube/auth')
 def youtube_auth():
