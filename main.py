@@ -1,362 +1,445 @@
-
-import os
-import json
-import time
-import random
-import requests
-import google.generativeai as genai
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+import os  
+import json  
+import time  
+import random  
 import subprocess
-import threading
-from dotenv import load_dotenv
+import shlex
+import re  
+import requests  
+import google.generativeai as genai  
+from flask import Flask, render_template, redirect, url_for, session, request,jsonify  
+from google.oauth2.credentials import Credentials  
+from google_auth_oauthlib.flow import Flow  
+from googleapiclient.discovery import build  
+from googleapiclient.http import MediaFileUpload  
+import subprocess  
+from dotenv import load_dotenv  
+from google.auth.transport.requests import Request
 
-# Load environment variables
-load_dotenv()
+# Load environment variables  
+load_dotenv()  
+  
+app = Flask(__name__)  
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'default_secret_key_change_me')  
+  
+# YouTube API scope  
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",  # ✅ Upload videos
+    "https://www.googleapis.com/auth/youtube",         # ✅ Manage YouTube account
+    "https://www.googleapis.com/auth/youtube.force-ssl", # ✅ Required for some operations
+    "https://www.googleapis.com/auth/userinfo.email",  # ✅ Get user email (optional)
+    "openid"  # ✅ Required for authentication (optional)
+]
+CLIENT_SECRET_FILE = 'client_secret.json'  
+TOKEN_FILE = 'token.json'  # File to store the credentials
 
-app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'default_secret_key_change_me')
+# Ensure directories exist  
+os.makedirs('audio', exist_ok=True)  
+os.makedirs('uploads', exist_ok=True)  
+  
+# Gemini AI Configuration  
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')  
+  
+# Function to generate a unique programming quote  
+  
+  
+# 🔑 Function to Get Credentials (Auto-Refresh)  
+def save_credentials(credentials, username):
+    token_data = {}
 
-# YouTube API scope
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+    # Load existing credentials if file exists
+    if os.path.exists("token.json"):
+        with open("token.json", "r") as f:
+            token_data = json.load(f)
 
-# Ensure directories exist
-os.makedirs('templates', exist_ok=True)
-os.makedirs('static', exist_ok=True)
-os.makedirs('uploads', exist_ok=True)
-
-# Create client_secret.json template if it doesn't exist
-CLIENT_SECRET_TEMPLATE = {
-    "web": {
-        "client_id": "",
-        "project_id": "",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_secret": "",
-        "redirect_uris": []
+    # Save new user credentials
+    token_data[username] = {
+        "token": credentials.token,
+        "refresh_token": credentials.refresh_token,  # Ensure refresh token is stored
+        "token_uri": credentials.token_uri,
+        "client_id": credentials.client_id,
+        "client_secret": credentials.client_secret,
+        "scopes": credentials.scopes
     }
-}
 
+    with open("token.json", "w") as f:
+        json.dump(token_data, f, indent=4)
+        
+
+
+def get_credentials(username):
+    if os.path.exists("token.json"):
+        with open("token.json", "r") as f:
+            token_data = json.load(f)
+
+        if username in token_data:
+            creds = Credentials.from_authorized_user_info(token_data[username], SCOPES)
+
+            # ✅ Force refresh if expired
+            if creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    save_credentials(creds, username)  # ✅ Save updated token
+                except Exception as e:
+                    print(f"Token refresh failed for {username}: {e}")
+                    return None  # 🔴 Force re-authentication
+
+            return creds  # ✅ Return valid credentials
+
+    return None  # 🔴 No credentials found
+    
+    
+def generate_unique_quote():    
+    try:    
+        if not GEMINI_API_KEY:    
+            return None, "Gemini API key is missing"    
+  
+        genai.configure(api_key=GEMINI_API_KEY)    
+        model = genai.GenerativeModel('gemini-2.0-flash')    
+  
+        prompt = (    
+            "Generate a unique, deep, and inspiring programming quote. "    
+            "The response must be a single quote enclosed in double quotes (\"\"). "    
+            "No extra text, no author name, no explanations. Only the quote inside double quotes."    
+        )    
+  
+        response = model.generate_content(prompt)    
+  
+        if not response or not response.text:    
+            return None, "Empty response from Gemini API"    
+  
+        # Extract quote using regex    
+        cleaned_text = response.text.strip().replace("\n", " ").strip()    
+        match = re.search(r'"(.*?)"', cleaned_text, re.DOTALL)    
+  
+        if match:    
+            return f'"{match.group(1)}"', None    
+  
+        return None, "Failed to extract a valid quote"    
+  
+    except Exception as e:    
+        return None, f"Error: {str(e)}"  
+# Function to select a random audio file from the "audio" folder  
+  
+  
+AUDIO_SAVE_FILE = "selected_audio.json"  # File to store selected audio  
+  
+def get_random_audio():  
+    try:  
+        audio_folder = os.path.abspath("audio")  # Get absolute path  
+        print("Checking folder:", audio_folder)  
+  
+        if not os.path.exists(audio_folder):  
+            return None, f"Audio folder not found: {audio_folder}"  
+  
+        # Try to load previously saved audio file  
+        if os.path.exists(AUDIO_SAVE_FILE):  
+            with open(AUDIO_SAVE_FILE, "r") as f:  
+                saved_audio = json.load(f).get("selected_audio")  
+                if saved_audio and os.path.exists(saved_audio):  
+                    print("Reusing saved audio:", saved_audio)  
+                    return saved_audio, None  # Use the saved audio file  
+  
+        # List all files in the folder  
+        all_files = os.listdir(audio_folder)  
+        print("All files in 'audio' folder:", all_files)  # Debug print  
+  
+        # If no files exist, return an error  
+        if not all_files:  
+            return None, "No files found in 'audio' folder"  
+  
+        # Filter audio files (common formats)  
+        audio_extensions = (".mp3", ".wav", ".ogg", ".aac", ".flac", ".m4a")  
+        audio_files = [f for f in all_files if f.lower().endswith(audio_extensions)]  
+        print("Filtered audio files:", audio_files)  # Debug print  
+  
+        # If no audio files are found, select ANY file as fallback  
+        selected_file = random.choice(audio_files) if audio_files else random.choice(all_files)  
+        selected_audio = os.path.join(audio_folder, selected_file)  
+  
+        # Save selected audio for future use  
+        with open(AUDIO_SAVE_FILE, "w") as f:  
+            json.dump({"selected_audio": selected_audio}, f)  
+  
+        print("Newly selected and saved audio:", selected_audio)  
+        return selected_audio, None  
+  
+    except Exception as e:  
+        return None, str(e)  
+# Function to create a video with a quote and background music  
+  
+  
+
+def wrap_text(quote, max_chars_per_line=30):
+    """Splits long text into multiple lines based on character limit."""
+    words = quote.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        if len(current_line) + len(word) < max_chars_per_line:
+            current_line += " " + word
+        else:
+            lines.append(current_line.strip())
+            current_line = word
+
+    if current_line:
+        lines.append(current_line.strip())
+
+    return lines
+
+def create_video(quote, audio_path):
+    try:
+        video_path = "uploads/final_video.mp4"  
+        background_image = "assets/dark_background.jpg"  
+        font_path = "assets/Poppins-Regular.ttf"  
+
+        wrapped_lines = wrap_text(quote, max_chars_per_line=30)
+        total_lines = len(wrapped_lines)
+
+        text_filters = []
+        for i, line in enumerate(wrapped_lines):
+            y_position = f"(h/2 - {((total_lines - i - 1) * 80)})"
+
+            # ✅ Properly escape text
+            escaped_line = shlex.quote(line)
+
+            text_filters.append(
+                f"drawtext=text={escaped_line}:"
+                f"fontfile={shlex.quote(font_path)}:"
+                "fontsize=60:fontcolor=white:"
+                "x=(w-text_w)/2:"
+                f"y={y_position}:"
+                "box=1:boxcolor=black@0.5:boxborderw=20"
+            )
+
+        text_filter = ",".join(text_filters)
+
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", background_image,  
+            "-i", audio_path,  
+            "-filter_complex", f"[0:v]scale=1080:1920,format=rgba,{text_filter}[v]",
+            "-map", "[v]",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",  
+            "-b:v", "2500k",  
+            "-r", "30",  
+            "-preset", "medium",  
+            "-profile:v", "high",  
+            "-tune", "stillimage",  
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ar", "44100",  
+            "-shortest",
+            video_path
+        ]
+
+        print("Running FFmpeg command:", " ".join(ffmpeg_cmd))
+        subprocess.run(ffmpeg_cmd, check=True)
+
+        return video_path, None
+
+    except subprocess.CalledProcessError as e:
+        return None, f"FFmpeg process error: {e}"
+
+    except Exception as e:
+        return None, str(e)
+        
+def generate_youtube_metadata():  
+    try:  
+        genai.configure(api_key=GEMINI_API_KEY)  
+        model = genai.GenerativeModel('gemini-2.0-flash')  
+
+        # **Prompt for Title**  
+        title_prompt = (  
+            "Generate a highly engaging and eye-catching YouTube **title** for a short motivational video about programming and coding. "
+            "It must **never be the same as previous ones**. Ensure it includes **at least 2 trending hashtags** that are popular in coding-related videos."
+            "Return **only** the title, no extra text."  
+        )  
+        title_response = model.generate_content(title_prompt)  
+        title = title_response.text.strip()  
+
+        # **Prompt for Description**  
+        description_prompt = (  
+            "Generate a **unique and engaging YouTube description** for a short video about programming motivation. "
+            "Make sure it has a **strong call-to-action**, includes a few relevant **hashtags**, and never repeats previous descriptions. "
+            "Return **only** the description, no extra text."  
+        )  
+        description_response = model.generate_content(description_prompt)  
+        description = description_response.text.strip()  
+
+        # **Prompt for Tags**  
+        tags_prompt = (  
+            "Generate **highly optimized YouTube tags** for a short motivational programming video. "
+            "Ensure they are **SEO-friendly**, relevant to coding, and always **unique** for each video. "
+            "Separate each tag with a comma and return **only** the tags, no extra text."  
+        )  
+        tags_response = model.generate_content(tags_prompt)  
+
+        # ✅ Sanitize tags
+        import re
+        tags = [re.sub(r'[^a-zA-Z0-9# ]', '', tag).strip() for tag in tags_response.text.strip().split(",") if tag.strip()]
+        tags = list(set(tags))[:10]  # Remove duplicates and limit to 10
+
+        return {"title": title, "description": description, "tags": tags}, None  
+    except Exception as e:  
+        return None, str(e)
+        
+# Function to upload video to YouTube  
+def upload_to_youtube(video_path, quote):
+    try:
+        if not os.path.exists(TOKEN_FILE):
+            return None, "No authenticated users found"
+
+        with open(TOKEN_FILE, "r") as f:
+            all_users = json.load(f)
+
+        if not all_users:
+            return None, "No saved user credentials"
+
+        # ✅ Generate unique metadata using AI
+        metadata, metadata_error = generate_youtube_metadata()
+        if metadata_error:
+            return None, f"Metadata generation failed: {metadata_error}"
+
+        video_title = metadata["title"]
+        video_description = metadata["description"]
+        video_tags = metadata["tags"]
+
+        uploaded_videos = []
+
+        for user_email, user_creds in all_users.items():
+            creds = get_credentials(user_email)  # ✅ Always load latest credentials
+            if not creds or not creds.valid:
+                return None, f"Invalid credentials for {user_email}"
+
+            youtube = build('youtube', 'v3', credentials=creds)
+
+            body = {
+                'snippet': {
+                    'title': video_title,
+                    'description': video_description,
+                    'tags': video_tags,
+                    'categoryId': '28'
+                },
+                'status': {'privacyStatus': 'public'}
+            }
+
+            media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
+            request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+            response = request.execute()
+
+            video_id = response.get('id')
+            uploaded_videos.append({"email": user_email, "video_id": video_id})
+
+        return uploaded_videos, None
+
+    except Exception as e:
+        return None, str(e)
 @app.route('/')
 def home():
     try:
-        # Check for API keys
-        gemini_api_key = os.environ.get('GEMINI_API_KEY')
-        client_secret_exists = os.path.exists('client_secret.json')
-        
-        # If API keys are not set, redirect to setup page
-        if not gemini_api_key or not client_secret_exists:
-            return redirect(url_for('setup'))
-            
-        user_id = request.headers.get('X-Replit-User-Id')
-        user_name = request.headers.get('X-Replit-User-Name')
-        user_roles = request.headers.get('X-Replit-User-Roles')
-        
-        authenticated = user_id is not None
-        
-        return render_template(
-            'index.html',
-            authenticated=authenticated,
-            user_id=user_id,
-            user_name=user_name,
-            user_roles=user_roles,
-            auto_start=True
-        )
-    except Exception as e:
-        return f"Error: {str(e)}"
+        quote, quote_error = generate_unique_quote()
+        if quote_error:
+            return jsonify({"error": f"Quote generation failed: {quote_error}"}), 500
 
-@app.route('/setup')
-def setup():
-    gemini_api_key = os.environ.get('GEMINI_API_KEY')
-    client_secret_exists = os.path.exists('client_secret.json')
+        audio_path, audio_error = get_random_audio()
+        if audio_error:
+            return jsonify({"error": f"Audio selection failed: {audio_error}"}), 500
+
+        video_path, video_error = create_video(quote, audio_path)
+        if video_error:
+            return jsonify({"error": f"Video creation failed: {video_error}"}), 500
+
+        # ✅ Load credentials for all users and upload to their YouTube channels
+        if not os.path.exists(TOKEN_FILE):
+            return jsonify({"error": "No saved YouTube credentials found"}), 401
+
+        with open(TOKEN_FILE, "r") as token_file:
+            all_users = json.load(token_file)
+
+        upload_results = []
+        for user_email, user_creds in all_users.items():
+            creds = Credentials.from_authorized_user_info(user_creds, SCOPES)
+
+            video_id, upload_error = video_id, upload_error = upload_to_youtube(video_path, quote)  # ✅ Pass 'quote' argument
+            if upload_error:
+                upload_results.append({"user": user_email, "error": upload_error})
+            else:
+                upload_results.append({"user": user_email, "video_id": video_id})
+
+        return jsonify({"success": True, "uploads": upload_results})
     
-    return render_template(
-        'setup.html',
-        gemini_api_key=gemini_api_key,
-        client_secret_exists=client_secret_exists
-    )
-
-@app.route('/save_keys', methods=['POST'])
-def save_keys():
-    try:
-        gemini_api_key = request.form.get('gemini_api_key')
-        client_id = request.form.get('client_id')
-        client_secret = request.form.get('client_secret')
-        project_id = request.form.get('project_id')
-        redirect_uri = url_for('oauth2callback', _external=True)
-        
-        # Save Gemini API key to .env file
-        with open('.env', 'w') as f:
-            f.write(f"GEMINI_API_KEY={gemini_api_key}\n")
-            f.write(f"FLASK_SECRET_KEY={os.urandom(24).hex()}\n")
-        
-        # Update environment variables
-        os.environ['GEMINI_API_KEY'] = gemini_api_key
-        
-        # Save client secret to file
-        if client_id and client_secret:
-            client_secret_json = CLIENT_SECRET_TEMPLATE.copy()
-            client_secret_json['web']['client_id'] = client_id
-            client_secret_json['web']['client_secret'] = client_secret
-            client_secret_json['web']['project_id'] = project_id
-            client_secret_json['web']['redirect_uris'] = [redirect_uri]
-            
-            with open('client_secret.json', 'w') as f:
-                json.dump(client_secret_json, f, indent=2)
-        
-        return redirect(url_for('home'))
-    except Exception as e:
-        return f"Error saving keys: {str(e)}"
-
-@app.route('/generate_quote', methods=['POST'])
-def generate_quote():
-    try:
-        gemini_api_key = os.environ.get('GEMINI_API_KEY')
-        if not gemini_api_key:
-            return jsonify({"error": "Gemini API key not configured"}), 500
-        
-        genai.configure(api_key=gemini_api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        prompt = "Generate a unique, powerful and inspiring programming quote that is deep and meaningful. Each quote should be completely different from any previous quotes. Return exactly two sentences, with each sentence on a new line. First line should be the quote, second line should be the author."
-        
-        response = model.generate_content(prompt)
-        quote_text = response.text.strip().split('\n')
-        
-        if len(quote_text) >= 2:
-            quote = quote_text[0].strip('"')
-            author = quote_text[1].strip()
-        else:
-            quote = quote_text[0].strip('"')
-            author = "Unknown"
-        
-        return jsonify({"quote": quote, "author": author})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route('/get_trending_audio')
-def get_trending_audio():
-    try:
-        from pytube import YouTube
-        import os
         
-        # Pre-selected popular videos for simplicity
-        popular_videos = [
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            "https://www.youtube.com/watch?v=JGwWNGJdvx8",
-            "https://www.youtube.com/watch?v=kJQP7kiw5Fk"
-        ]
-        
-        # Random selection for variety
-        random.shuffle(popular_videos)
-        
-        songs = []
-        
-        for video_url in popular_videos[:1]:  # Just get one song for speed
-            try:
-                # Get video info
-                yt = YouTube(video_url)
-                
-                # Download audio only
-                audio_path = os.path.join('uploads', f"{yt.title.replace(' ', '_')}_audio.mp3")
-                
-                if not os.path.exists(audio_path):
-                    audio = yt.streams.filter(only_audio=True).first()
-                    audio.download(output_path='uploads', filename=os.path.basename(audio_path))
-                
-                songs.append({
-                    "title": yt.title,
-                    "artist": yt.author,
-                    "url": audio_path,
-                    "thumbnail": yt.thumbnail_url
-                })
-            except Exception as e:
-                print(f"Error processing video {video_url}: {str(e)}")
-        
-        # If we failed to get any songs, provide a fallback
-        if not songs:
-            songs = [
-                {"title": "Default Background Music", "artist": "System", "url": "uploads/default_audio.mp3"}
-            ]
-            
-        return jsonify({"songs": songs})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/create_video', methods=['POST'])
-def create_video():
-    try:
-        data = request.json
-        quote = data.get('quote', '')
-        author = data.get('author', '')
-        audio_url = data.get('audio_url', '')
-        
-        if not os.path.exists('uploads'):
-            os.makedirs('uploads')
-            
-        # Generate a unique filename
-        timestamp = int(time.time())
-        video_path = f'uploads/quote_video_{timestamp}.mp4'
-        
-        # Split the quote into lines if needed for better display
-        quote_lines = [quote]
-        if len(quote) > 50:  # Split long quotes
-            words = quote.split()
-            mid = len(words) // 2
-            quote_lines = [' '.join(words[:mid]), ' '.join(words[mid:])]
-        
-        # Create a video with text using ffmpeg
-        text_cmd = [
-            'ffmpeg', '-y',
-            '-f', 'lavfi', 
-            '-i', f'color=c=#121212:s=720x1280:d=15', 
-            '-vf', f"drawtext=text='{quote_lines[0]}':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=(h/2)-100:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:box=1:boxcolor=black@0.5:line_spacing=10," +
-                  (f"drawtext=text='{quote_lines[1]}':fontcolor=#FFDD00:fontsize=40:x=(w-text_w)/2:y=(h/2):fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:box=1:boxcolor=black@0.5:line_spacing=10," if len(quote_lines) > 1 else "") +
-                  f"drawtext=text='- {author}':fontcolor=white:fontsize=30:x=(w-text_w)/2:y=(h/2)+150:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            '-c:v', 'libx264', 
-            '-t', '15',
-            '-pix_fmt', 'yuv420p',
-            video_path
-        ]
-        
-        subprocess.run(text_cmd)
-        
-        # Add audio if it exists
-        if os.path.exists(audio_url) and audio_url.startswith('uploads/'):
-            temp_video = f'uploads/temp_{timestamp}.mp4'
-            os.rename(video_path, temp_video)
-            
-            audio_cmd = [
-                'ffmpeg', '-y',
-                '-i', temp_video,
-                '-i', audio_url,
-                '-c:v', 'copy',
-                '-c:a', 'aac',
-                '-shortest',
-                video_path
-            ]
-            
-            subprocess.run(audio_cmd)
-            
-            # Clean up temp file
-            if os.path.exists(temp_video):
-                os.remove(temp_video)
-        
-        return jsonify({"video_path": video_path})
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
 @app.route('/youtube/auth')
 def youtube_auth():
-    if not os.path.exists('client_secret.json'):
-        return redirect(url_for('setup'))
-        
-    flow = Flow.from_client_secrets_file(
-        'client_secret.json',
-        scopes=SCOPES,
-        redirect_uri=url_for('oauth2callback', _external=True)
-    )
-    
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true'
-    )
-    
-    session['state'] = state
-    
-    return redirect(authorization_url)
+    try:
+        flow = Flow.from_client_secrets_file(
+            CLIENT_SECRET_FILE,
+            scopes=SCOPES,
+            redirect_uri=url_for('oauth2callback', _external=True)
+        )
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent'  # Ensures refresh token is generated
+        )
+        session['state'] = state
+        return redirect(authorization_url)
+
+    except Exception as e:
+        return jsonify({"error": f"OAuth auth failed: {str(e)}"}), 500
 
 @app.route('/oauth2callback')
 def oauth2callback():
-    state = session.get('state')
-    
-    flow = Flow.from_client_secrets_file(
-        'client_secret.json',
-        scopes=SCOPES,
-        state=state,
-        redirect_uri=url_for('oauth2callback', _external=True)
-    )
-    
-    # Use the authorization server's response to fetch the OAuth 2.0 tokens
-    authorization_response = request.url
-    flow.fetch_token(authorization_response=authorization_response)
-    
-    credentials = flow.credentials
-    session['credentials'] = {
-        'token': credentials.token,
-        'refresh_token': credentials.refresh_token,
-        'token_uri': credentials.token_uri,
-        'client_id': credentials.client_id,
-        'client_secret': credentials.client_secret,
-        'scopes': credentials.scopes
-    }
-    
-    return redirect(url_for('home'))
-
-@app.route('/upload_to_youtube', methods=['POST'])
-def upload_to_youtube():
-    if 'credentials' not in session:
-        return jsonify({"error": "Not authenticated with YouTube"}), 401
-    
-    credentials = Credentials(
-        **session['credentials']
-    )
-    
-    youtube = build('youtube', 'v3', credentials=credentials)
-    
-    data = request.json
-    video_path = data.get('video_path')
-    quote = data.get('quote', '')
-    author = data.get('author', '')
-    
-    # Generate SEO-friendly title and description using Gemini
-    gemini_api_key = os.environ.get('GEMINI_API_KEY')
-    if not gemini_api_key:
-        return jsonify({"error": "Gemini API key not configured"}), 500
-        
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    seo_prompt = f"Generate a catchy YouTube title, description with hashtags for a programming quote video containing this quote: {quote} by {author}. Format the response as JSON with fields: title, description, tags (as an array)."
-    
     try:
-        seo_response = model.generate_content(seo_prompt)
-        seo_text = seo_response.text
-        
-        # Extract JSON from response
-        seo_data = json.loads(seo_text)
-        
-        # Upload to YouTube
-        body = {
-            'snippet': {
-                'title': seo_data.get('title'),
-                'description': seo_data.get('description'),
-                'tags': seo_data.get('tags'),
-                'categoryId': '28'  # Science & Technology category
-            },
-            'status': {
-                'privacyStatus': 'public'
-            }
-        }
-        
-        # This is the actual upload
-        media = MediaFileUpload(video_path, chunksize=-1, resumable=True)
-        request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-        response = request.execute()
-        
-        return jsonify({
-            "success": True, 
-            "message": "Video uploaded with title: " + seo_data.get('title'),
-            "video_id": response.get('id')
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        state = session.get('state')
+        flow = Flow.from_client_secrets_file(
+            CLIENT_SECRET_FILE,
+            scopes=SCOPES,
+            state=state,
+            redirect_uri=url_for('oauth2callback', _external=True)
+        )
+        flow.fetch_token(authorization_response=request.url)
+        creds = flow.credentials
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+        # Get user email to store credentials uniquely
+        session['credentials'] = credentials_to_dict(creds)
+        youtube = build('youtube', 'v3', credentials=creds)
+        user_info = youtube.channels().list(part="snippet", mine=True).execute()
+        user_email = user_info["items"][0]["id"]  # ✅ Always exists and is unique
+
+        # Load existing tokens
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, 'r') as f:
+                tokens = json.load(f)
+        else:
+            tokens = {}
+
+        # ✅ Save user credentials separately
+        tokens[user_email] = credentials_to_dict(creds)
+
+        with open(TOKEN_FILE, 'w') as f:
+            json.dump(tokens, f, indent=4)
+
+        return redirect(url_for('home'))
+
+    except Exception as e:
+        return jsonify({"error": f"OAuth callback failed: {str(e)}"}), 500
+        
+def credentials_to_dict(credentials):  
+    return {  
+        'token': credentials.token,  
+        'refresh_token': credentials.refresh_token,  
+        'token_uri': credentials.token_uri,  
+        'client_id': credentials.client_id,  
+        'client_secret': credentials.client_secret,  
+        'scopes': credentials.scopes  
+    }  
+  
+if __name__ == '__main__':  
+    app.run(host='0.0.0.0', port=8080, debug=True)   
